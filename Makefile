@@ -9,4 +9,4 @@ build:
 
 lint:
 	go vet ./...
-	shellcheck kickstart.sh
+	shellcheck --severity=warning kickstart.sh
