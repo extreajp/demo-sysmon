@@ -1,8 +1,6 @@
 # local docs
 SPEC.md
 AGENT.md
-AGENTS.md
-AGETNS.md
 
 # generated
 bin/
