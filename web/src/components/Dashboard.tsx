@@ -15,6 +15,13 @@ type Payload = {
 };
 type Bench = { running?: boolean; scenario?: string; phase?: string };
 
+const CPU_CAP = 1;
+const HINT: Record<string, string> = {
+  ramp: "light 30–50ms work, then 500ms CPU",
+  "cpu-burst": "2000ms × 2 workers × 15/s ≈ 60× cap",
+  "io-burst": "32MB sync write, no CPU cap",
+};
+
 function push(buf: number[], v: number): number[] {
   const next = buf.length >= CAP ? buf.slice(buf.length - CAP + 1) : buf.slice();
   next.push(v);
@@ -25,6 +32,12 @@ function val(samples: Sample[], name: string): number {
   return samples.find((s) => s.name === name)?.value ?? 0;
 }
 
+function writeSectors(samples: Sample[]): number {
+  return samples
+    .filter((s) => s.name === "disk.write_sectors")
+    .reduce((sum, s) => sum + s.value, 0);
+}
+
 export function Dashboard() {
   const [sse, setSse] = useState<"connected" | "disconnected">("disconnected");
   const [cpu, setCpu] = useState(0);
@@ -32,17 +45,25 @@ export function Dashboard() {
   const [load1, setLoad1] = useState(0);
   const [hostPsiCpu, setHostPsiCpu] = useState(0);
   const [hostPsiIo, setHostPsiIo] = useState(0);
+  const [writeMbs, setWriteMbs] = useState(0);
   const [cgroupPsiCpu, setCgroupPsiCpu] = useState(0);
   const [cgroupPsiIo, setCgroupPsiIo] = useState(0);
   const [firing, setFiring] = useState(0);
   const [pressure, setPressure] = useState(false);
-  const [hostHist, setHostHist] = useState<number[]>([]);
-  const [cgHist, setCgHist] = useState<number[]>([]);
+  const [hostHistCpu, setHostHistCpu] = useState<number[]>([]);
+  const [hostHistIo, setHostHistIo] = useState<number[]>([]);
+  const [hostHistWrite, setHostHistWrite] = useState<number[]>([]);
+  const [cgHistCpu, setCgHistCpu] = useState<number[]>([]);
+  const [cgHistIo, setCgHistIo] = useState<number[]>([]);
   const [p99Hist, setP99Hist] = useState<number[]>([]);
-  const [stats, setStats] = useState({ p50: 0, p99: 0, rps: 0, errorRate: 0, inFlight: 0 });
+  const [stats, setStats] = useState({
+    p50: 0, p99: 0, recv: 0, done: 0, wait: 0, totalRecv: 0, totalDone: 0,
+    offer: 0, backlog: 0, errorRate: 0,
+  });
   const [bench, setBench] = useState<Bench>({});
   const [scenario, setScenario] = useState("ramp");
   const live = useRef({ cpu: 0, mem: 0, load1: 0, hostPsiCpu: 0, cgroupPsiCpu: 0 });
+  const prevWrite = useRef({ sectors: 0, t: 0 });
 
   useEffect(() => {
     const es = new EventSource(`${SYSMON_URL}/api/stream`);
@@ -64,14 +85,27 @@ export function Dashboard() {
         setCpu(live.current.cpu);
         setMem(live.current.mem);
         setLoad1(live.current.load1);
+        const now = Date.now();
+        const sectors = writeSectors(samples);
+        let mbs = 0;
+        if (prevWrite.current.t > 0 && now > prevWrite.current.t) {
+          const dt = (now - prevWrite.current.t) / 1000;
+          const delta = Math.max(0, sectors - prevWrite.current.sectors);
+          mbs = (delta * 512) / (1024 * 1024) / dt;
+        }
+        prevWrite.current = { sectors, t: now };
         setHostPsiCpu(hpCpu);
         setHostPsiIo(hpIo);
+        setWriteMbs(mbs);
         setCgroupPsiCpu(cpCpu);
         setCgroupPsiIo(cpIo);
         setFiring(p.firing ?? 0);
         setPressure(cpCpu > 20);
-        setHostHist((h) => push(h, hpCpu));
-        setCgHist((h) => push(h, cpIo));
+        setHostHistCpu((h) => push(h, hpCpu));
+        setHostHistIo((h) => push(h, hpIo));
+        setHostHistWrite((h) => push(h, mbs));
+        setCgHistCpu((h) => push(h, cpCpu));
+        setCgHistIo((h) => push(h, cpIo));
         setSse("connected");
       } catch {
         /* ignore */
@@ -89,9 +123,14 @@ export function Dashboard() {
         setStats({
           p50: s.latencyMs?.p50 ?? 0,
           p99: s.latencyMs?.p99 ?? 0,
-          rps: s.rps ?? 0,
+          recv: s.recv ?? 0,
+          done: s.done ?? s.rps ?? 0,
+          wait: s.wait ?? s.inFlight ?? 0,
+          totalRecv: s.totalRecv ?? 0,
+          totalDone: s.totalDone ?? 0,
+          offer: s.offer ?? 0,
+          backlog: s.backlog ?? 0,
           errorRate: s.errorRate ?? 0,
-          inFlight: s.inFlight ?? 0,
         });
         setP99Hist((h) => push(h, s.latencyMs?.p99 ?? 0));
       } catch {
@@ -120,8 +159,8 @@ export function Dashboard() {
 
   const benchLabel = (() => {
     if (bench.running) return `${bench.scenario || "?"} / ${bench.phase || "…"}`;
-    if (stats.inFlight > 0) {
-      const n = stats.inFlight;
+    if (stats.wait > 0) {
+      const n = stats.wait;
       return bench.scenario ? `${bench.scenario} / draining (${n})` : `draining (${n})`;
     }
     return "idle";
@@ -133,6 +172,15 @@ export function Dashboard() {
         <strong>demo-sysmon</strong>
         <span className={sse === "connected" ? styles.ok : styles.bad}>SSE: {sse}</span>
         <span>bench: {benchLabel}</span>
+        <span>recv: {stats.recv}</span>
+        <span>done: {stats.done}</span>
+        <span>wait: {stats.wait}</span>
+        {(stats.totalRecv > 0 || stats.totalDone > 0) && (
+          <>
+            <span>total recv: {stats.totalRecv}</span>
+            <span>total done: {stats.totalDone}</span>
+          </>
+        )}
         <span>alerts firing: {firing}</span>
       </header>
 
@@ -145,8 +193,22 @@ export function Dashboard() {
             <dt>Load 1m</dt><dd>{load1.toFixed(2)}</dd>
             <dt>PSI cpu</dt><dd>{hostPsiCpu.toFixed(2)}</dd>
             <dt>PSI io</dt><dd>{hostPsiIo.toFixed(2)}</dd>
+            <dt>Write</dt><dd>{writeMbs.toFixed(2)} MB/s</dd>
           </dl>
-          <Sparkline values={hostHist} />
+          <div className={styles.sparks}>
+            <div className={styles.spark}>
+              <span>PSI cpu</span>
+              <Sparkline values={hostHistCpu} color="#6ee7b7" />
+            </div>
+            <div className={styles.spark}>
+              <span>PSI io</span>
+              <Sparkline values={hostHistIo} color="#047857" />
+            </div>
+            <div className={styles.spark}>
+              <span>Write</span>
+              <Sparkline values={hostHistWrite} color="#86efac" suffix=" MB/s" />
+            </div>
+          </div>
         </section>
 
         <section className={styles.card}>
@@ -156,7 +218,16 @@ export function Dashboard() {
             <dt>cgroup PSI io</dt><dd>{cgroupPsiIo.toFixed(2)}</dd>
           </dl>
           {pressure && <p className={styles.warn}>Pressure detected</p>}
-          <Sparkline values={cgHist} color="#fbbf24" />
+          <div className={styles.sparks}>
+            <div className={styles.spark}>
+              <span>PSI cpu</span>
+              <Sparkline values={cgHistCpu} color="#fde68a" />
+            </div>
+            <div className={styles.spark}>
+              <span>PSI io</span>
+              <Sparkline values={cgHistIo} color="#d97706" />
+            </div>
+          </div>
         </section>
 
         <section className={styles.card}>
@@ -164,19 +235,46 @@ export function Dashboard() {
           <dl>
             <dt>p50</dt><dd>{stats.p50.toFixed(1)} ms</dd>
             <dt>p99</dt><dd>{stats.p99.toFixed(1)} ms</dd>
-            <dt>RPS</dt><dd>{stats.rps.toFixed(1)}</dd>
+            <dt>recv</dt><dd>{stats.recv}</dd>
+            <dt>done</dt><dd>{stats.done}</dd>
+            <dt>wait</dt><dd>{stats.wait}</dd>
+            {(stats.totalRecv > 0 || stats.totalDone > 0) && (
+              <>
+                <dt>total recv</dt><dd>{stats.totalRecv}</dd>
+                <dt>total done</dt><dd>{stats.totalDone}</dd>
+              </>
+            )}
             <dt>Error</dt><dd>{(stats.errorRate * 100).toFixed(1)}%</dd>
+            <dt>offer</dt><dd className={stats.offer > CPU_CAP ? styles.hot : undefined}>{stats.offer.toFixed(1)} / {CPU_CAP.toFixed(1)}</dd>
+            <dt>backlog</dt><dd>{stats.backlog.toFixed(1)} CPU-s</dd>
           </dl>
-          <Sparkline values={p99Hist} color="#93c5fd" />
+          <div className={styles.work}>
+            <span>Work</span>
+            <div className={styles.workTrack}>
+              <div
+                className={`${styles.workFill} ${stats.offer > CPU_CAP ? styles.workOver : ""}`}
+                style={{ width: `${Math.min(100, (stats.offer / CPU_CAP) * 100)}%` }}
+              />
+            </div>
+          </div>
+          <div className={styles.sparks}>
+            <div className={styles.spark}>
+              <span>p99</span>
+              <Sparkline values={p99Hist} color="#93c5fd" suffix=" ms" />
+            </div>
+          </div>
         </section>
       </div>
 
       <section className={styles.controls}>
-        <select value={scenario} onChange={(e) => setScenario(e.target.value)}>
-          <option value="ramp">ramp</option>
-          <option value="cpu-burst">cpu-burst</option>
-          <option value="io-burst">io-burst</option>
-        </select>
+        <div className={styles.scenario}>
+          <select value={scenario} onChange={(e) => setScenario(e.target.value)}>
+            <option value="ramp">ramp</option>
+            <option value="cpu-burst">cpu-burst</option>
+            <option value="io-burst">io-burst</option>
+          </select>
+          <p>{HINT[scenario]}</p>
+        </div>
         <button type="button" onClick={start}>負荷開始</button>
         <button type="button" onClick={stop}>停止</button>
       </section>

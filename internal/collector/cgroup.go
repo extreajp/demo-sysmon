@@ -25,6 +25,10 @@ func (c *CgroupPSI) Collect() ([]metric.Sample, error) {
 	var out []metric.Sample
 	for _, ref := range c.Cgroups {
 		dir := c.resolved[ref.Name]
+		if dir != "" && !hasCPUPressure(dir) {
+			delete(c.resolved, ref.Name)
+			dir = ""
+		}
 		if dir == "" {
 			dir = resolveCgroup(root, ref.Container)
 			if dir != "" {
@@ -47,6 +51,11 @@ func (c *CgroupPSI) Collect() ([]metric.Sample, error) {
 		}
 	}
 	return out, nil
+}
+
+func hasCPUPressure(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "cpu.pressure"))
+	return err == nil
 }
 
 func resolveCgroup(root, container string) string {

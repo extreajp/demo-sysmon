@@ -8,5 +8,10 @@ web/.next
 *.tsbuildinfo
 __pycache__
 *.pyc
+*.log
+nohup.out
+coverage.out
+coverage.html
+*.coverprofile
 SPEC.md
 AGENT.md

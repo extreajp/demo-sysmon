@@ -7,5 +7,5 @@ export async function GET(req: Request) {
   const denied = denyIfDisabled();
   if (denied) return denied;
   const ms = Math.min(5000, Math.max(1, Number(new URL(req.url).searchParams.get("ms") || "50")));
-  return timed(() => busyWork(ms));
+  return timed(() => busyWork(ms), ms);
 }

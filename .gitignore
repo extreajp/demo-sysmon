@@ -12,6 +12,11 @@ web/.next/
 *.tsbuildinfo
 __pycache__/
 *.pyc
+*.log
+nohup.out
+coverage.out
+coverage.html
+*.coverprofile
 
 # env / os
 .env

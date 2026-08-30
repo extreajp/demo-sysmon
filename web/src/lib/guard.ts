@@ -9,8 +9,8 @@ export function denyIfDisabled() {
   return null;
 }
 
-export async function timed(fn: () => Promise<unknown> | unknown) {
-  const t0 = begin();
+export async function timed(fn: () => Promise<unknown> | unknown, cpuMs = 0) {
+  const t0 = begin(cpuMs);
   try {
     const v = await fn();
     end(t0, false);

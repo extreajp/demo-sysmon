@@ -8,18 +8,23 @@ import (
 	"time"
 
 	"github.com/extreajp/demo-sysmon/internal/alert"
-	"github.com/extreajp/demo-sysmon/internal/collector"
+	"github.com/extreajp/demo-sysmon/internal/metric"
 	"github.com/extreajp/demo-sysmon/internal/output"
 )
 
+type snapshotter interface {
+	Snapshot() (metric.Snapshot, error)
+}
+
 type Server struct {
-	Collect  *collector.Set
+	Collect  snapshotter
 	Alerts   *alert.Engine
 	CORS     string
 	Interval time.Duration
 
-	mu   sync.Mutex
-	last payload
+	mu     sync.Mutex
+	last   payload
+	lastAt time.Time
 }
 
 type payload struct {
@@ -72,15 +77,23 @@ func (s *Server) allowed(origin string) string {
 }
 
 func (s *Server) collect() (payload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	interval := s.Interval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	if !s.lastAt.IsZero() && time.Since(s.lastAt) < interval {
+		return s.last, nil
+	}
 	snap, err := s.Collect.Snapshot()
 	if err != nil {
 		return payload{}, err
 	}
 	states := s.Alerts.Evaluate(snap)
 	p := payload{Snapshot: snap, Alerts: states, Firing: alert.FiringCount(states)}
-	s.mu.Lock()
 	s.last = p
-	s.mu.Unlock()
+	s.lastAt = time.Now()
 	return p, nil
 }
 
@@ -147,9 +160,14 @@ func fmtSSE(w http.ResponseWriter, event string, data []byte) (int, error) {
 }
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
-	snap, err := s.Collect.Snapshot()
+	p, err := s.collect()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	snap, ok := p.Snapshot.(metric.Snapshot)
+	if !ok {
+		http.Error(w, "no snapshot", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
