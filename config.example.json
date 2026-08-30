@@ -1,0 +1,37 @@
+{
+  "interval": "1s",
+  "cgroups": [
+    { "name": "web", "container": "sysmon-demo-web" }
+  ],
+  "serve": {
+    "listen": "127.0.0.1:9101",
+    "cors_origin": "http://localhost:3000"
+  },
+  "alerts": [
+    {
+      "name": "ContainerCpuStalled",
+      "metric": "cgroup.web.psi.cpu.some.avg10",
+      "op": ">",
+      "threshold": 20,
+      "for": "10s",
+      "severity": "warning"
+    },
+    {
+      "name": "HostCpuSaturated",
+      "metric": "host.psi.cpu.some.avg10",
+      "op": ">",
+      "threshold": 40,
+      "for": "15s",
+      "severity": "warning"
+    },
+    {
+      "name": "DiskFull",
+      "metric": "disk.usage_percent",
+      "labels": { "mount": "/" },
+      "op": ">",
+      "threshold": 85,
+      "for": "1m",
+      "severity": "critical"
+    }
+  ]
+}

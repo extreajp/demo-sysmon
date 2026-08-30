@@ -1,0 +1,11 @@
+[Unit]
+Description=demo-sysmon host metrics
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sysmon serve --config /etc/sysmon/config.json --listen 127.0.0.1:9101
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

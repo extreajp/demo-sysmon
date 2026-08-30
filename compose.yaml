@@ -1,0 +1,46 @@
+name: sysmon-demo
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: sysmon-demo-web
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    environment:
+      DEMO_LOAD_ENABLED: "1"
+      DEMO_CPU_WORKERS: "2"
+      LOADGEN_URL: http://loadgen:8000
+      NEXT_PUBLIC_SYSMON_URL: http://127.0.0.1:${SYSMON_PORT:-9101}
+      HOME: /tmp
+    cpus: "1.0"
+    mem_limit: 128m
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    depends_on:
+      loadgen:
+        condition: service_healthy
+
+  loadgen:
+    build:
+      context: .
+      dockerfile: loadgen/Dockerfile
+    container_name: sysmon-demo-loadgen
+    environment:
+      WEB_URL: http://web:3000
+      SYSMON_URL: http://host.docker.internal:9101
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./out:/out
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

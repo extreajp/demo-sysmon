@@ -1,0 +1,28 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  sysmon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -o dist/sysmon-linux-amd64 ./cmd/sysmon/
+          GOOS=linux GOARCH=arm64 go build -o dist/sysmon-linux-arm64 ./cmd/sysmon/
+      - name: Upload release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/sysmon-linux-amd64
+            dist/sysmon-linux-arm64

@@ -1,0 +1,13 @@
+.git
+bin
+out
+.run
+web/node_modules
+web/.next
+*.tsbuildinfo
+__pycache__
+*.pyc
+SPEC.md
+AGENT.md
+AGENTS.md
+AGETNS.md

@@ -1,0 +1,21 @@
+# local docs
+SPEC.md
+AGENT.md
+AGENTS.md
+AGETNS.md
+
+# generated
+bin/
+out/
+.run/
+web/node_modules/
+web/.next/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+
+# env / os
+.env
+.env.*
+.DS_Store
+Thumbs.db
