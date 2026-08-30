@@ -8,6 +8,7 @@ AGETNS.md
 bin/
 out/
 .run/
+.io/
 web/node_modules/
 web/.next/
 *.tsbuildinfo

@@ -26,7 +26,7 @@ export function holdMemory(mb: number, holdSec: number): Promise<number> {
 
 export function syncIO(mb: number): number {
   const n = Math.max(1, mb) * 1024 * 1024;
-  const p = path.join("/tmp", "sysmon-io-" + process.pid);
+  const p = path.join("/data", "sysmon-io");
   const fd = fs.openSync(p, "w");
   try {
     const chunk = Buffer.alloc(64 * 1024, 7);

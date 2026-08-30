@@ -25,7 +25,7 @@ Commands:
   status   Show PID, compose, snapshot excerpt
   bench    Run loadgen scenario (default: ramp)
   logs     Tail logs (sysmon|web|loadgen)
-  purge    down + remove .run/, out/, bin/sysmon
+  purge    down + remove .run/, out/, .io/, bin/sysmon
 
 Options:
   --build          Force compose rebuild
@@ -44,7 +44,8 @@ need_docker() {
 }
 
 ensure_dirs() {
-  mkdir -p "$RUN_DIR" "$ROOT/bin" "$ROOT/out"
+  mkdir -p "$RUN_DIR" "$ROOT/bin" "$ROOT/out" "$ROOT/.io"
+  chmod 1777 "$ROOT/.io"
 }
 
 sysmon_pid() {
@@ -205,7 +206,7 @@ cmd_logs() {
 
 cmd_purge() {
   cmd_down
-  rm -rf "$RUN_DIR" "$ROOT/out" "$BIN"
+  rm -rf "$RUN_DIR" "$ROOT/out" "$ROOT/.io" "$BIN"
   info "purged"
 }
 

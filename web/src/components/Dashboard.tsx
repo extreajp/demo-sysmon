@@ -30,17 +30,19 @@ export function Dashboard() {
   const [cpu, setCpu] = useState(0);
   const [mem, setMem] = useState(0);
   const [load1, setLoad1] = useState(0);
-  const [hostPsi, setHostPsi] = useState(0);
-  const [cgroupPsi, setCgroupPsi] = useState(0);
+  const [hostPsiCpu, setHostPsiCpu] = useState(0);
+  const [hostPsiIo, setHostPsiIo] = useState(0);
+  const [cgroupPsiCpu, setCgroupPsiCpu] = useState(0);
+  const [cgroupPsiIo, setCgroupPsiIo] = useState(0);
   const [firing, setFiring] = useState(0);
   const [pressure, setPressure] = useState(false);
   const [hostHist, setHostHist] = useState<number[]>([]);
   const [cgHist, setCgHist] = useState<number[]>([]);
   const [p99Hist, setP99Hist] = useState<number[]>([]);
-  const [stats, setStats] = useState({ p50: 0, p99: 0, rps: 0, errorRate: 0 });
+  const [stats, setStats] = useState({ p50: 0, p99: 0, rps: 0, errorRate: 0, inFlight: 0 });
   const [bench, setBench] = useState<Bench>({});
   const [scenario, setScenario] = useState("ramp");
-  const live = useRef({ cpu: 0, mem: 0, load1: 0, hostPsi: 0, cgroupPsi: 0 });
+  const live = useRef({ cpu: 0, mem: 0, load1: 0, hostPsiCpu: 0, cgroupPsiCpu: 0 });
 
   useEffect(() => {
     const es = new EventSource(`${SYSMON_URL}/api/stream`);
@@ -48,24 +50,28 @@ export function Dashboard() {
       try {
         const p = JSON.parse((ev as MessageEvent).data) as Payload;
         const samples = p.snapshot?.samples ?? [];
-        const hp = val(samples, "host.psi.cpu.some.avg10");
-        const cp = val(samples, "cgroup.web.psi.cpu.some.avg10");
+        const hpCpu = val(samples, "host.psi.cpu.some.avg10");
+        const hpIo = val(samples, "host.psi.io.some.avg10");
+        const cpCpu = val(samples, "cgroup.web.psi.cpu.some.avg10");
+        const cpIo = val(samples, "cgroup.web.psi.io.some.avg10");
         live.current = {
           cpu: val(samples, "cpu.usage_percent"),
           mem: val(samples, "memory.usage_percent"),
           load1: val(samples, "loadavg.1"),
-          hostPsi: hp,
-          cgroupPsi: cp,
+          hostPsiCpu: hpCpu,
+          cgroupPsiCpu: cpCpu,
         };
         setCpu(live.current.cpu);
         setMem(live.current.mem);
         setLoad1(live.current.load1);
-        setHostPsi(hp);
-        setCgroupPsi(cp);
+        setHostPsiCpu(hpCpu);
+        setHostPsiIo(hpIo);
+        setCgroupPsiCpu(cpCpu);
+        setCgroupPsiIo(cpIo);
         setFiring(p.firing ?? 0);
-        setPressure(cp > 20);
-        setHostHist((h) => push(h, hp));
-        setCgHist((h) => push(h, cp));
+        setPressure(cpCpu > 20);
+        setHostHist((h) => push(h, hpCpu));
+        setCgHist((h) => push(h, cpIo));
         setSse("connected");
       } catch {
         /* ignore */
@@ -85,6 +91,7 @@ export function Dashboard() {
           p99: s.latencyMs?.p99 ?? 0,
           rps: s.rps ?? 0,
           errorRate: s.errorRate ?? 0,
+          inFlight: s.inFlight ?? 0,
         });
         setP99Hist((h) => push(h, s.latencyMs?.p99 ?? 0));
       } catch {
@@ -111,7 +118,14 @@ export function Dashboard() {
     await fetch("/api/bench/stop", { method: "POST" });
   }
 
-  const benchLabel = bench.running ? `${bench.scenario || "?"} / ${bench.phase || "…"}` : "idle";
+  const benchLabel = (() => {
+    if (bench.running) return `${bench.scenario || "?"} / ${bench.phase || "…"}`;
+    if (stats.inFlight > 0) {
+      const n = stats.inFlight;
+      return bench.scenario ? `${bench.scenario} / draining (${n})` : `draining (${n})`;
+    }
+    return "idle";
+  })();
 
   return (
     <div className={styles.wrap}>
@@ -129,7 +143,8 @@ export function Dashboard() {
             <dt>CPU</dt><dd>{cpu.toFixed(1)}%</dd>
             <dt>Memory</dt><dd>{mem.toFixed(1)}%</dd>
             <dt>Load 1m</dt><dd>{load1.toFixed(2)}</dd>
-            <dt>PSI avg10</dt><dd>{hostPsi.toFixed(2)}</dd>
+            <dt>PSI cpu</dt><dd>{hostPsiCpu.toFixed(2)}</dd>
+            <dt>PSI io</dt><dd>{hostPsiIo.toFixed(2)}</dd>
           </dl>
           <Sparkline values={hostHist} />
         </section>
@@ -137,7 +152,8 @@ export function Dashboard() {
         <section className={styles.card}>
           <h2>Web container</h2>
           <dl>
-            <dt>cgroup PSI avg10</dt><dd>{cgroupPsi.toFixed(2)}</dd>
+            <dt>cgroup PSI cpu</dt><dd>{cgroupPsiCpu.toFixed(2)}</dd>
+            <dt>cgroup PSI io</dt><dd>{cgroupPsiIo.toFixed(2)}</dd>
           </dl>
           {pressure && <p className={styles.warn}>Pressure detected</p>}
           <Sparkline values={cgHist} color="#fbbf24" />
