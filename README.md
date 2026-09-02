@@ -2,20 +2,19 @@
 
 ![dashboard](./assets/dashboard.png)
 
-Linux上のWebアプリに負荷をかけたとき、**PSI**（リソースstall）と**p99**（応答遅延）がどう連動するかを、再現・可視化するデモです。
+Linux上のコンテナアプリに負荷をかけた際に、**PSI**（リソースstall）と**p99**（応答遅延）がどう連動するかを、再現・可視化するデモです。
 
-**PSI**（**P**ressure **S**tall **I**nformation）はLinuxカーネルが提供する指標で、タスクがCPU・メモリ・I/Oを待って進めない時間の割合を表します。SNMPやnode_exporterは使わず、`/proc`とcgroupを自前で読みます。
+**PSI**（**P**ressure **S**tall **I**nformation）はLinuxカーネルが提供する指標で、タスクがCPU・メモリ・I/Oを待って進めない時間の割合を表します。SNMPやnode_exporterは使わず、`/proc`とcgroupの値を元に可視化しています。
 
-よくある状況 — 「マシン全体は余裕なのに、あるサービスだけ遅い」— を、webコンテナのCPU上限（`cpus: 1.0`）で意図的に再現します。ホストOS側のload averageだけでは見えにくいstallを早く捉え、インフラ指標とアプリ指標を同じタイムラインで見られます。
+よくある状況 — 「マシン全体は余裕なのに、あるサービスだけ遅い」— を、webコンテナのCPU飽和状態を（`cpus: 1.0`）で意図的に再現します。これによりホストOS側のload averageだけ判別しづらいstallを早く捉え、インフラ指標とアプリ指標を同じタイムラインで確認可能です。
 
 ## 技術スタック
 
-| 層 | 技術 |
+| 機能 | スタック |
 |----|------|
 | メトリクス収集（`sysmon`） | Go 1.22+、`/proc` / cgroup v2 / PSI |
 | ダッシュボード + 負荷対象（`web`） | Next.js 15、TypeScript、Node 22、CSS |
 | 負荷シナリオ（`loadgen`） | Python 3.12、＊標準ライブラリのみ |
-| 配布 | GitHub（ソース。`sysmon`はホストでgo build） |
 | 動作確認環境 | Ubuntu 24.04.4 LTS、Docker Compose（web: `cpus=1.0`, `mem=512m`） |
 
 ## 構成
@@ -42,26 +41,26 @@ flowchart TB
   sysmon -->|cgroup PSI| cgroup
 ```
 
-- `sysmon`: ホスト上で動作。`/proc`とcgroupを読む
-- `web`: 画面表示・負荷対象・レスポンス計測用コンテナ。CPUリソースを1コアに制限し、サービス単位の飽和を再現
-- ブラウザ: `sysmon`へSSE接続してメトリクスを取得
+- `sysmon`: ホスト上で動作。`/proc`とcgroupの値を読取りログに保存します。
+- `web`: 画面表示・負荷対象・レスポンス計測用コンテナ。CPUリソースを制限することで、サービス単位の飽和を再現
+- ブラウザ: `sysmon`へSSE接続し各種メトリクスを取得
 - `loadgen`: HTTPロードジェネレーター用コンテナ
 
-## ダッシュボードの3パネル
+## ダッシュボードについて
 
-| パネル | 表示内容 | 高いときの意味 |
+| パネル | 表示内容 | 高負荷時の状況 |
 |--------|----------|----------------|
 | **Host** | マシン全体のCPU・メモリ・Load・**PSI cpu / PSI io** | ホスト全体に余裕がない、または他プロセスも巻き込み。io-burstでは**PSI io**が主指標 |
 | **Web container** | このサービスのcgroup PSI cpu / io | CPU上限への到達（cpu）、またはこのプロセスもI/O待ち（io） |
 | **Next.js latency** | HTTP応答時間のp50/p99、recv/done/wait、offer/backlog、エラー率 | ユーザーから見て応答が遅い・不安定 |
 
-メインシナリオ（ramp / cpu-burst）で顕著に確認できる相関は、**cgroup PSI cpuが先に上がり、そのあとp99が悪化する**ことです。CPUだけコンテナ上限（`cpus: 1.0`）があるので、「ホストは余裕、そのサービスだけ遅い」が再現できます。io-burstは対比で、**Host PSI io**が先に動きます。
+メインシナリオ（ramp / cpu-burst）では、**cgroup PSI cpuが先に上がり、そのあとp99が悪化する**状態の遷移と相関が確認可能です。コンテナのCPU上限（`cpus: 1.0`）により、「ホストは余裕、そのサービスだけ遅い」状況が再現できます。io-burstは対比で、**Host PSI io**が先に動きます。
 
 ## 用語
 
-**PSI**（**P**ressure **S**tall **I**nformation）は、Linuxカーネルが提供する指標で、タスクがCPU・メモリ・I/Oを待って進めない時間の割合を表します。詳細は[公式ドキュメント](https://docs.kernel.org/accounting/psi.html)を参照してください。
+**PSI**（**P**ressure **S**tall **I**nformation）は、Linuxカーネルが提供する指標で、タスクのCPU・メモリ・ディスクI/O待ちが発生し処理に進めない時間の割合を表します。詳細は[公式ドキュメント](https://docs.kernel.org/accounting/psi.html)を参照してください。
 
-| 用語 | 意味 | 高いときの見立て |
+| 用語 | 概要 | 詳細 |
 |------|------|------------------|
 | **PSI cpu / PSI io** | 直近10秒のstall割合（ホスト） | リソース不足で処理が待たされている。load averageより早く立ち上がることがある |
 | **p50** | 指標：半分のリクエストがこれ以下 | 全体の「いつもの速さ」。p50も悪い = 全体が遅い |
